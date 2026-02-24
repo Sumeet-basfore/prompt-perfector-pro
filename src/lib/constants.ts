@@ -64,6 +64,9 @@ export const EDITORS = [
   { id: "gemini-cli", label: "Gemini CLI", icon: "♊" },
   { id: "bolt", label: "Bolt.new", icon: "⚡" },
   { id: "lovable", label: "Lovable", icon: "💜" },
+  { id: "opencode", label: "OpenCode", icon: "📟" },
+  { id: "codex", label: "Codex", icon: "🧠" },
+  { id: "antigravity", label: "Antigravity", icon: "🪐" },
 ] as const;
 
 export type TemplateId = (typeof TEMPLATES)[number]["id"];
