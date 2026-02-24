@@ -38,6 +38,12 @@ const EDITOR_INSTRUCTIONS: Record<string, string> = {
     "Format for Bolt.new: Describe the full feature in a single comprehensive prompt, include UI layout descriptions, specify tech stack preferences, mention responsive design requirements, and describe the complete user flow.",
   "lovable":
     "Format for Lovable: Describe features conversationally, specify design preferences and color schemes, mention responsive behavior, include user stories, and describe the desired look and feel.",
+  "opencode":
+    "Format for OpenCode: Use clear markdown structure, specify file paths explicitly, include step-by-step instructions, focus on code-level details, and provide context about the existing codebase.",
+  "codex":
+    "Format for Codex CLI: Be concise and direct, use imperative instructions, specify exact file changes needed, include expected behavior descriptions, and mention test cases.",
+  "antigravity":
+    "Format for Antigravity: Use structured natural language, describe the desired outcome clearly, include UI/UX details, specify responsive behavior, and mention integration requirements.",
 };
 
 serve(async (req) => {
