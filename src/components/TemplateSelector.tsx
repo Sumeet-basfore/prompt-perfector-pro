@@ -13,6 +13,8 @@ interface Props {
 }
 
 export function TemplateSelector({ value, onChange }: Props) {
+  const selected = TEMPLATES.find((t) => t.id === value);
+
   return (
     <div>
       <label className="block text-xs font-medium text-muted-foreground mb-1.5">Template</label>
@@ -31,6 +33,9 @@ export function TemplateSelector({ value, onChange }: Props) {
           ))}
         </SelectContent>
       </Select>
+      {selected && (
+        <p className="mt-1.5 text-xs text-muted-foreground">{selected.description}</p>
+      )}
     </div>
   );
 }
