@@ -117,8 +117,21 @@ ${editorInstructions ? `\n${editorInstructions}` : ""}`;
       }
       const t = await response.text();
       console.error("AI gateway error:", response.status, t);
-      return new Response(JSON.stringify({ error: "Failed to enhance prompt. Please try again." }), {
-        status: 500,
+
+      let errorMessage = "Failed to enhance prompt. Please try again.";
+      try {
+        const errorJson = JSON.parse(t);
+        const innerMessage = errorJson?.error?.message || "";
+        // AI gateway sometimes returns a nested stringified JSON in the message
+        if (innerMessage.includes("prompt is too long") || innerMessage.includes("maximum context length")) {
+          errorMessage = "Your project context or prompt is too long for the AI to process. Please reduce the length and try again.";
+        }
+      } catch (e) {
+        // Ignore parse errors, fallback to default message
+      }
+
+      return new Response(JSON.stringify({ error: errorMessage }), {
+        status: response.status === 400 ? 400 : 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

@@ -1,0 +1,122 @@
+# Cursor Rules for Vibe Prompt
+
+## Project Context
+**App:** Vibe Prompt — "Plain English in. Perfect AI prompts out."
+**Stack:** React + Tailwind CSS, Vercel, Supabase, Gemini 2.5 Flash + Groq fallback
+**Stage:** MVP — 14-day build
+**User:** Solo vibe-coder founder — explain your reasoning, don't just generate code
+
+---
+
+## Directives
+1. **Master Plan First:** Always read `AGENTS.md` before starting any task — it has the current phase and active todos
+2. **Documentation:** Load `agent_docs/` files relevant to the task (don't load all at once)
+3. **Plan Before Coding:** Propose a brief approach and wait for approval before writing code
+4. **One Feature at a Time:** Never implement two things in parallel — finish, test, then move on
+5. **Explain Trade-offs:** When you recommend something, briefly mention why and what the alternative was
+6. **Mobile-First Always:** Every component must work on 375px screens — check this before marking anything done
+
+---
+
+## Architecture Rules
+
+### File References
+Use @-mention style for all file references in prompts and explanations:
+- Components: `@PromptTransformer.tsx`, `@EditorSelector.tsx`
+- Utilities: `@systemPrompt.ts`, `@supabaseClient.ts`
+- Config: `@tailwind.config.ts`, `@.env.local`
+
+### Component Structure
+- Components go in `src/components/`
+- Utility functions go in `src/lib/` or `src/utils/`
+- Constants (system prompt, category contexts) go in `src/lib/prompts.ts`
+- Supabase client initialized once in `src/lib/supabaseClient.ts`
+
+### Styling
+- Tailwind utility classes only — no custom CSS unless absolutely necessary
+- Mobile-first: base styles for mobile, `sm:` / `md:` for larger screens
+- Color variables from `agent_docs/tech_stack.md` — primary: `#7C3AED`, accent: `#F59E0B`
+- Rounded corners: `rounded-xl` (12px) throughout
+- Minimum touch target: 44px height for all interactive elements
+
+---
+
+## Critical Implementation Details
+
+### The System Prompt (Most Important Code)
+The `buildSystemPrompt(templateCategory, aiEditor)` function in `@src/lib/prompts.ts` is the core product.
+Full implementation is in `agent_docs/code_patterns.md`. Load it before touching this function.
+
+### API Call Pattern
+1. Try Gemini first (`gemini-2.0-flash`)
+2. On 429 or 503 → automatically fall back to Groq (`llama-3.3-70b-versatile`)
+3. On both failing → show: "Our AI is taking a quick break — try again in 60 seconds 🌿"
+4. Log every API attempt to Supabase `api_events` table
+
+### Environment Variables
+**NEVER hardcode API keys.** All secrets via `.env.local`:
+```
+GEMINI_API_KEY=
+GROQ_API_KEY=
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+```
+
+### Privacy (Non-Negotiable)
+- Never store actual prompt text server-side for anonymous users
+- Supabase `transformations` table stores: character counts, template, editor, model, was_copied, feedback — nothing else
+- Verify no keys appear in browser DevTools → Network tab
+
+---
+
+## What NOT To Do
+- Do NOT add features outside the current phase in `AGENTS.md`
+- Do NOT put API keys in source code — environment variables only
+- Do NOT build saved prompts, share links, or community features until Phase 5
+- Do NOT add a sign-up gate before the transformation — zero friction is the value prop
+- Do NOT skip mobile testing — treat it as a blocker, not a nice-to-have
+- Do NOT store user prompt content in any database for anonymous users
+- Do NOT use custom CSS when a Tailwind class exists
+
+---
+
+## Design System
+
+### Colors
+```
+Primary CTA:    #7C3AED (warm purple)
+Primary hover:  #6D28D9
+Accent:         #F59E0B (warm amber)
+Success/Copy:   #10B981 (green)
+Background:     #FAFAFA (off-white)
+Surface/Cards:  #FFFFFF
+Text primary:   #111827
+Text secondary: #6B7280
+Border:         #E5E7EB
+```
+
+### Animations
+- Button hover: `transition-all duration-200`
+- Result reveal: `opacity-0 translate-y-4` → `opacity-100 translate-y-0`
+- Copy success: color transition on button
+
+---
+
+## Testing After Every Change
+Before saying a feature is done, verify:
+- [ ] Works on desktop Chrome
+- [ ] Works on 375px mobile (use DevTools device emulator at minimum)
+- [ ] No console errors
+- [ ] No horizontal scroll at 375px width
+- [ ] API keys not visible in DevTools Network tab
+
+Full checklists in `agent_docs/testing.md`.
+
+---
+
+## Debugging Template
+When something breaks, provide a fix using this structure:
+1. What the error means (plain English)
+2. Why it happened
+3. The fix (with @file references)
+4. How to verify it's resolved

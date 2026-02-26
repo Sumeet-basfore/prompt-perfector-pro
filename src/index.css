@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -8,6 +8,10 @@
   :root {
     --background: 0 0% 99%;
     --foreground: 215 25% 15%;
+
+    --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-serif: 'Playfair Display', Georgia, Cambria, 'Times New Roman', Times, serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
     --card: 0 0% 100%;
     --card-foreground: 215 25% 15%;
@@ -43,6 +47,11 @@
     --surface-sunken: 220 20% 97%;
     --glow-primary: 239 84% 67%;
     --glow-accent: 160 84% 39%;
+
+    /* Hero Gradient Colors */
+    --hero-glow-dark: #3B76F6;
+    --hero-glow-mid: #A8C5FC;
+    --hero-glow-light: #FFFFFF;
 
     --shadow-soft: 0 4px 24px -4px hsl(239 84% 67% / 0.08);
     --shadow-medium: 0 8px 32px -8px hsl(239 84% 67% / 0.12);
@@ -98,6 +107,16 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    font-family: var(--font-sans);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-serif);
+    @apply tracking-tight;
+  }
+
+  button {
+    @apply transition-all duration-300 ease-in-out;
   }
 }
 
@@ -121,6 +140,11 @@
 
   .surface-sunken {
     background: hsl(var(--surface-sunken));
+  }
+
+  .bg-hero-gradient {
+    background: radial-gradient(100% 100% at 50% 0%, var(--hero-glow-mid) 0%, var(--hero-glow-light) 50%, transparent 100%);
+    /* Adjusting to match the distinct top blue blur fading into white */
   }
 }
 
@@ -159,4 +183,19 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Custom subtle scrollbar for projects sidebar */
+.projects-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.projects-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.projects-scroll::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border) / 0.5);
+  border-radius: 10px;
+}
+.projects-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.5);
 }

@@ -1,82 +1,237 @@
-import { useState, useRef } from "react";
-import { Sparkles, Copy, Check, RotateCcw } from "lucide-react";
+import { useState, useRef, lazy, Suspense, useReducer, useCallback } from "react";
+import { Sparkles, Copy, Check, RotateCcw, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { TEMPLATES, EDITORS, type TemplateId, type EditorId } from "@/lib/constants";
+import { TEMPLATES, type TemplateId, type EditorId } from "@/lib/constants";
 import { streamEnhancePrompt } from "@/lib/stream";
 import { TemplateSelector } from "@/components/TemplateSelector";
 import { EditorSelector } from "@/components/EditorSelector";
-import { PromptOutput } from "@/components/PromptOutput";
-import { useToast } from "@/hooks/use-toast";
+import { InteractiveHoverButton } from "@/components/ui/interactive-hover-button";
+import { TextShimmer } from "@/components/ui/text-shimmer";
+import { toast } from "sonner";
+import { useSearchParams } from 'react-router-dom';
+import { useProjects } from '@/lib/contexts/ProjectsContext';
+import { useOnboarding } from "@/hooks/useOnboarding";
+import { OnboardingTooltip } from "@/components/ui/onboarding-tooltip";
+
+const PromptOutput = lazy(() =>
+  import("@/components/PromptOutput").then((m) => ({ default: m.PromptOutput }))
+);
+
+type TransformerState =
+  | { status: "idle" }
+  | { status: "typing" }
+  | { status: "loading" }
+  | { status: "success"; output: string }
+  | { status: "error"; message: string }
+  | { status: "copied"; output: string };
+
+type TransformerAction =
+  | { type: "INPUT_CHANGE" }
+  | { type: "START_ENHANCE" }
+  | { type: "STREAM_CHUNK"; chunk: string }
+  | { type: "ENHANCE_SUCCESS"; output: string }
+  | { type: "ENHANCE_ERROR"; error: string }
+  | { type: "COPY_TO_CLIPBOARD" }
+  | { type: "COPY_TIMEOUT" }
+  | { type: "RESET" };
+
+function transformerReducer(state: TransformerState, action: TransformerAction): TransformerState {
+  switch (action.type) {
+    case "INPUT_CHANGE":
+      return state.status === "idle" ? { status: "typing" } : state;
+    case "START_ENHANCE":
+      return { status: "loading" };
+    case "STREAM_CHUNK":
+      if (state.status === "loading" || state.status === "success") {
+        const newOutput = state.status === "success" ? state.output + action.chunk : action.chunk;
+        return { status: "success", output: newOutput };
+      }
+      return state;
+    case "ENHANCE_SUCCESS":
+      return { status: "success", output: action.output };
+    case "ENHANCE_ERROR":
+      return { status: "error", message: action.error };
+    case "COPY_TO_CLIPBOARD":
+      if (state.status === "success") {
+        return { status: "copied", output: state.output };
+      }
+      return state;
+    case "COPY_TIMEOUT":
+      if (state.status === "copied") {
+        return { status: "success", output: state.output };
+      }
+      return state;
+    case "RESET":
+      return { status: "idle" };
+    default:
+      return state;
+  }
+}
+
+function PromptOutputSkeleton() {
+  return (
+    <div className="space-y-2">
+      <div className="h-4 bg-muted rounded animate-pulse w-3/4" />
+      <div className="h-4 bg-muted rounded animate-pulse w-1/2" />
+      <div className="h-4 bg-muted rounded animate-pulse w-5/6" />
+    </div>
+  );
+}
 
 const Index = () => {
+  const [searchParams] = useSearchParams();
+  const currentProjectId = searchParams.get('project') || "default";
+  const { state, addPrompt } = useProjects();
+  const currentProject = state.projects[currentProjectId];
+
+  // Onboarding Hooks
+  const { hasSeenEditorTooltip, hasSeenSaveTooltip, markEditorTooltipSeen } = useOnboarding();
+  const [showEditorTooltip, setShowEditorTooltip] = useState(false);
+
   const [input, setInput] = useState("");
   const [template, setTemplate] = useState<TemplateId>("ui-frontend");
   const [editor, setEditor] = useState<EditorId>("claude-code");
-  const [output, setOutput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasResult, setHasResult] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [transformerState, dispatch] = useReducer(transformerReducer, { status: "idle" });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { toast } = useToast();
+
+  const isLoading = transformerState.status === "loading";
+  const hasResult = transformerState.status === "success" || transformerState.status === "copied" || transformerState.status === "error";
+  const output = (transformerState.status === "success" || transformerState.status === "copied") ? transformerState.output : "";
+  const isCopied = transformerState.status === "copied";
+  const errorMessage = transformerState.status === "error" ? transformerState.message : null;
+
+  const handleInputChange = useCallback((value: string) => {
+    const trimmed = value.slice(0, 1000);
+    setInput(trimmed);
+
+    if (trimmed.length > 0 && !hasSeenEditorTooltip) {
+      setShowEditorTooltip(true);
+    }
+
+    if (trimmed.length > 0 && transformerState.status === "idle") {
+      dispatch({ type: "INPUT_CHANGE" });
+    }
+  }, [transformerState.status, hasSeenEditorTooltip]);
 
   const handleEnhance = async () => {
     if (!input.trim() || isLoading) return;
 
-    setIsLoading(true);
-    setOutput("");
-    setHasResult(true);
+    dispatch({ type: "START_ENHANCE" });
 
     let accumulated = "";
 
+    const userPromptText = input.trim();
+    const fullContextPrompt = currentProject?.systemInstructions
+      ? `System Instructions:\n${currentProject.systemInstructions}\n\nTask:\n${userPromptText}`
+      : userPromptText;
+
+    // Approximate token limit check (100k tokens ~400k chars)
+    // We'll be conservative and use 350,000 chars to leave room for system prompts
+    if (fullContextPrompt.length > 350000) {
+      toast.error("Context Too Large", {
+        description: "Your project's system instructions and prompt combined are too large for the AI to process. Please reduce the text length.",
+      });
+      dispatch({ type: "RESET" });
+      return;
+    }
+
     await streamEnhancePrompt({
-      userPrompt: input.trim(),
+      userPrompt: fullContextPrompt,
       template,
       editor,
       onDelta: (chunk) => {
         accumulated += chunk;
-        setOutput(accumulated);
+        dispatch({ type: "STREAM_CHUNK", chunk });
       },
       onDone: () => {
-        setIsLoading(false);
+        dispatch({ type: "ENHANCE_SUCCESS", output: accumulated });
+
+        if (!hasSeenSaveTooltip) {
+          window.dispatchEvent(new Event('vibe-prompt:success'));
+        }
+
+        addPrompt({
+            projectId: currentProjectId,
+            title: userPromptText.slice(0, 30) + (userPromptText.length > 30 ? '...' : ''),
+            input: userPromptText,
+            output: accumulated,
+            templateId: template,
+            editorId: editor,
+            tags: [],
+        });
       },
       onError: (error) => {
-        setIsLoading(false);
-        setHasResult(false);
-        toast({
-          title: "Oops!",
-          description: error,
-          variant: "destructive",
-        });
+        dispatch({ type: "ENHANCE_ERROR", error });
+        toast.error("Oops!", { description: error });
       },
     });
   };
 
   const handleCopy = async () => {
+    if (!output) return;
     try {
       await navigator.clipboard.writeText(output);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      dispatch({ type: "COPY_TO_CLIPBOARD" });
+      setTimeout(() => dispatch({ type: "COPY_TIMEOUT" }), 2000);
     } catch {
-      toast({ title: "Couldn't copy", description: "Please select and copy manually.", variant: "destructive" });
+      toast.error("Couldn't copy", { description: "Please select and copy manually." });
     }
   };
 
   const handleReset = () => {
     setInput("");
-    setOutput("");
-    setHasResult(false);
-    setIsLoading(false);
+    dispatch({ type: "RESET" });
     textareaRef.current?.focus();
   };
 
-  const selectedTemplate = TEMPLATES.find((t) => t.id === template)!;
+  const selectedTemplate = TEMPLATES.find((t) => t.id === template) ?? TEMPLATES[0];
+
+  const buttonState = {
+    idle: {
+      disabled: !input.trim(),
+      className: "bg-accent text-accent-foreground hover:brightness-110 shadow-accent-glow",
+      icon: Sparkles,
+      label: "Enhance My Prompt",
+    },
+    typing: {
+      disabled: !input.trim(),
+      className: "bg-accent text-accent-foreground hover:brightness-110 shadow-accent-glow",
+      icon: Sparkles,
+      label: "Enhance My Prompt",
+    },
+    loading: {
+      disabled: true,
+      className: "bg-accent/70 text-accent-foreground/70 cursor-wait",
+      icon: null,
+      label: "Enhancing...",
+    },
+    success: {
+      disabled: false,
+      className: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+      icon: RotateCcw,
+      label: "Start Over",
+    },
+    error: {
+      disabled: false,
+      className: "bg-accent text-accent-foreground hover:brightness-110 shadow-accent-glow",
+      icon: Sparkles,
+      label: "Try Again",
+    },
+    copied: {
+      disabled: false,
+      className: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+      icon: RotateCcw,
+      label: "Start Over",
+    },
+  }[transformerState.status];
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       {/* Header */}
       <header className="border-b border-border/50">
         <div className="container flex items-center justify-between py-4">
           <div className="flex items-center gap-2">
+            <img src="/logo.png" alt="Vibe Prompt Logo" className="h-8 w-8 object-contain" />
             <span className="text-xl font-bold tracking-tight text-foreground">
               Vibe<span className="text-gradient-primary">Prompt</span>
             </span>
@@ -126,33 +281,53 @@ const Index = () => {
             </div>
 
             {/* Action Button */}
-            <Button
-              onClick={hasResult ? handleReset : handleEnhance}
-              disabled={!hasResult && (!input.trim() || isLoading)}
-              className={`w-full h-12 rounded-xl text-base font-semibold transition-all duration-200 ${
-                hasResult
-                  ? "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                  : "bg-accent text-accent-foreground hover:brightness-110 shadow-accent-glow"
-              }`}
-            >
-              {isLoading ? (
-                <span className="flex items-center gap-2">
-                  <span className="h-4 w-4 border-2 border-accent-foreground/30 border-t-accent-foreground rounded-full animate-spin" />
-                  Enhancing…
-                </span>
-              ) : hasResult ? (
-                <span className="flex items-center gap-2">
-                  <RotateCcw className="h-4 w-4" />
-                  Start Over
-                </span>
-              ) : (
-                <span className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4" />
-                  Enhance My Prompt
-                </span>
-              )}
-            </Button>
+            <div className="flex justify-center mt-4 w-full relative">
+              <OnboardingTooltip
+                isOpen={showEditorTooltip}
+                onClose={() => {
+                  setShowEditorTooltip(false);
+                  markEditorTooltipSeen();
+                }}
+                position="top"
+                title="Ready to perfect it?"
+              >
+                Click here when you're done typing to let AI structure and polish your prompt.
+              </OnboardingTooltip>
+              <InteractiveHoverButton
+                onClick={hasResult ? handleReset : handleEnhance}
+                disabled={buttonState.disabled}
+                className={`w-full h-12 text-base font-semibold transition-all duration-200 ${
+                  buttonState.className.includes("bg-accent")
+                    ? "border-accent/30 text-accent bg-accent/5 hover:border-accent"
+                    : "border-secondary text-secondary-foreground bg-secondary/50"
+                }`}
+              >
+                {isLoading ? (
+                  <span className="flex items-center gap-2">
+                    <span className="h-4 w-4 border-2 border-accent-foreground/30 border-t-accent-foreground rounded-full animate-spin" />
+                    <TextShimmer duration={1.2} className="text-base font-semibold">
+                      {buttonState.label}
+                    </TextShimmer>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    {buttonState.icon && <buttonState.icon className="h-4 w-4" />}
+                    {buttonState.label}
+                  </span>
+                )}
+              </InteractiveHoverButton>
+            </div>
           </div>
+
+          {/* Error Banner */}
+          {errorMessage && (
+            <div className="mt-4 p-4 rounded-xl bg-destructive/10 border border-destructive/20 animate-fade-up">
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                <p className="text-sm">{errorMessage}</p>
+              </div>
+            </div>
+          )}
 
           {/* Result */}
           {hasResult && (
@@ -174,10 +349,14 @@ const Index = () => {
                   {output && !isLoading && (
                     <button
                       onClick={handleCopy}
-                      className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-secondary"
+                      className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md transition-colors ${
+                        isCopied
+                          ? "text-green-600 bg-green-50"
+                          : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                      }`}
                       aria-label="Copy enhanced prompt"
                     >
-                      {copied ? (
+                      {isCopied ? (
                         <>
                           <Check className="h-3.5 w-3.5 text-accent" />
                           Copied!
@@ -191,7 +370,9 @@ const Index = () => {
                     </button>
                   )}
                 </div>
-                <PromptOutput text={output} isStreaming={isLoading} />
+                <Suspense fallback={<PromptOutputSkeleton />}>
+                  <PromptOutput text={output} isStreaming={isLoading} />
+                </Suspense>
               </div>
             </div>
           )}
